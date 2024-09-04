@@ -57,14 +57,14 @@ bot.on("message", async (msg) => {
       const response = await axios.get(weatherAPIUrl);
       const weatherData = response.data;
       const weatherMessage = `${weatherData.name}: ${weatherData.weather[0].description}, ${weatherData.main.temp} °C`;
-      bot.sendMessage(id, weatherMessage);
+      bot.sendMessage(id, `Погода в Вашем местоположении: ${weatherMessage}`);
     } catch (error) {
       bot.sendMessage(id, "Не удалось получить данные о погоде.");
       console.error("Ошибка при запросе погоды", error);
     }
   }
 
-  console.log(`Получено сообщение от ${msg.chat.id}: ${msg.text}`);
+  console.log(`Получено сообщение от ${msg.chat.id}: ${msg.location}`);
 });
 
 const daileMessage = "Доброе утро, пора выпить таблетку 😉";
