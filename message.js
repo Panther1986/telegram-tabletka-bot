@@ -1,94 +1,135 @@
 require("dotenv").config();
+const { Bot, GrammyError } = require("grammy");
 const axios = require("axios");
-const TelegramBot = require("node-telegram-bot-api");
-const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
+const schedule = require("node-schedule");
 
-let chatIds = [];
+const bot = new Bot(process.env.BOT_TOKEN);
 
-bot.onText(/\/start/, (msg) => {
-  const chatId = msg.chat.id;
+let reminders = {};
 
-  bot.sendMessage(chatId, "Кукусики! Выбирайте настройку:", {
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: "Узнать погоду", callback_data: "setting_1" },
-          { text: "Напомнить о важном деле", callback_data: "setting_2" },
-        ],
-      ],
-    },
-  });
-  if (!chatIds.includes(chatId)) {
-    chatIds.push(chatId);
+bot.api.setMyCommands([
+  { command: "start", description: "Запуск бота" },
+  { command: "weather", description: "Узнать погоду" },
+  { command: "reminder", description: "Напомнить о важном деле" },
+  { command: "tabletka", description: "Напомнить о приеме лекарств" },
+]);
+
+bot.command("start", async (ctx) => {
+  await ctx.reply("Кукусики! Выбирайте настройку:");
+});
+
+bot.command("weather", async (ctx) => {
+  await ctx.reply(
+    "Пожалуйста, отправьте своё местоположение для получения данных о погоде."
+  );
+});
+
+bot.command("reminder", async (ctx) => {
+  const chatId = ctx.chat.id;
+  reminders[chatId] = { state: "waiting_for_date" };
+  await ctx.reply(
+    "Введите дату, время и текст напоминания в формате 'YYYY-MM-DD HH:MM текст напоминания' (например, 2024-09-06 15:00 Забрать посылку)"
+  );
+});
+
+bot.command("tabletka", async (ctx) => {
+  await ctx.reply(
+    "Пожалуйста, установите время, когда Вам напомнить о приеме лекарств"
+  );
+});
+
+bot.on("message:location", async (ctx) => {
+  const { latitude, longitude } = ctx.message.location;
+  const weatherAPIUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${latitude}&lon=${longitude}&units=metric&appid=${process.env.API}`;
+
+  try {
+    const response = await axios.get(weatherAPIUrl);
+    const weatherData = response.data;
+    const weatherMessage = `${weatherData.name}: ${weatherData.weather[0].description}, ${weatherData.main.temp} °C`;
+    await ctx.reply(`Погода в Вашем местоположении: ${weatherMessage}`);
+  } catch (error) {
+    await ctx.reply("Не удалось получить данные о погоде.");
+    console.error("Ошибка при запросе погоды", error);
   }
 });
 
-bot.on("callback_query", (callback_query) => {
-  const msg = callback_query.message;
-  const data = callback_query.data;
+bot.on("message:text", async (ctx) => {
+  const chatId = ctx.chat.id;
 
-  let response = "";
-
-  switch (data) {
-    case "setting_1":
-      response = "Вы выбрали узнать погоду. Отправьте мне Ваше местоположение";
-      break;
-    case "setting_2":
-      response = "Вы выбрали напомнить о важном деле ";
-      break;
-
-    default:
-      response = "Неизвестная настройка";
-      break;
-  }
-
-  bot.sendMessage(msg.chat.id, response);
-});
-
-bot.on("message", async (msg) => {
-  const id = msg.chat.id;
-  if (!chatIds.includes(id)) {
-    chatIds.push(id);
-  }
-  if (msg.location) {
-    console.log(msg.location);
-    const weatherAPIUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${msg.location.latitude}&lon=${msg.location.longitude}&units=metric&appid=${process.env.API}`;
-    try {
-      const response = await axios.get(weatherAPIUrl);
-      const weatherData = response.data;
-      const weatherMessage = `${weatherData.name}: ${weatherData.weather[0].description}, ${weatherData.main.temp} °C`;
-      bot.sendMessage(id, `Погода в Вашем местоположении: ${weatherMessage}`);
-    } catch (error) {
-      bot.sendMessage(id, "Не удалось получить данные о погоде.");
-      console.error("Ошибка при запросе погоды", error);
+  if (reminders[chatId] && reminders[chatId].state === "waiting_for_date") {
+    const reminderDate = new Date(ctx.message.text);
+    const input = ctx.message.text.trim();
+    console.log(input);
+    const datePattern = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/;
+    if (!datePattern.test(input)) {
+      await ctx.reply("Неправильный формат даты и времени. Попробуйте снова.");
+      return;
     }
-  }
 
-  console.log(`Получено сообщение от ${msg.chat.id}: ${msg.location}`);
+    reminders[chatId].text = input;
+    reminders[chatId].job = schedule.scheduleJob(reminderDate, () => {
+      ctx.reply(`Напоминание: ${reminders[chatId].text}`);
+      delete reminders[chatId];
+    });
+
+    reminders[chatId].state = "set";
+    await ctx.reply(`Напоминание установлено на ${ctx.message.text}`);
+  } else {
+    console.log(`Received message: ${ctx.message.text}`);
+  }
 });
 
-const daileMessage = "Доброе утро, пора выпить таблетку 😉";
+bot.on("message:text", async (ctx) => {
+  const chatId = ctx.chat.id;
 
-function sendDailyMessage() {
-  chatIds.forEach((id) => {
-    bot
-      .sendMessage(id, daileMessage)
-      .then(() => console.log(`Сообщение отправлено в чат ${id}`))
-      .catch((err) => console.error("Ошибка", err));
-  });
-}
+  if (reminders[chatId] && reminders[chatId].state === "waiting_for_time") {
+    const input = ctx.message.text.trim();
+    const timePattern = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
-const time = new Date();
-time.setHours(9, 0, 0, 0);
+    if (!timePattern.test(input)) {
+      await ctx.reply("Неправильный формат времени. Попробуйте снова.");
+      return;
+    }
 
-const now = new Date();
-let delay = time - now;
+    const [hour, minute] = input.split(":").map(Number);
 
-if (delay < 0) {
-  delay += 86400000;
-}
+    if (reminders[chatId].job) {
+      reminders[chatId].job.cancel();
+    }
 
-setTimeout(() => {
-  sendDailyMessage();
-  setInterval(sendDailyMessage, 86400000);
-}, delay);
+    const now = new Date();
+    const reminderDate = new Date();
+    reminderDate.setHours(hour);
+    reminderDate.setMinutes(minute);
+    reminderDate.setSeconds(0);
+
+    if (reminderDate < now) {
+      reminderDate.setDate(now.getDate() + 1);
+    }
+
+    reminders[chatId].job = schedule.scheduleJob("0 0 * * *", () => {
+      if (reminders[chatId]) {
+        bot.api.sendMessage(chatId, `Напоминание: Время принять таблетки!`);
+      }
+    });
+
+    reminders[chatId].state = "set";
+    await ctx.reply(`Напоминание установлено на ${input} каждый день.`);
+  } else {
+    console.log(`Received message: ${ctx.message.text}`);
+  }
+});
+
+bot.catch((err) => {
+  const ctx = err.ctx;
+  console.error(`Error while handling update ${ctx.update.update_id}`);
+  const e = err.error;
+
+  if (e instanceof GrammyError) {
+    console.error("Error in request:", e.description);
+  } else {
+    console.error(e);
+  }
+});
+
+bot.start();
