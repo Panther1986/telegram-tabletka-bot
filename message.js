@@ -79,47 +79,6 @@ bot.on("message:text", async (ctx) => {
   }
 });
 
-bot.on("message:text", async (ctx) => {
-  const chatId = ctx.chat.id;
-
-  if (reminders[chatId] && reminders[chatId].state === "waiting_for_time") {
-    const input = ctx.message.text.trim();
-    const timePattern = /^([01]\d|2[0-3]):([0-5]\d)$/;
-
-    if (!timePattern.test(input)) {
-      await ctx.reply("Неправильный формат времени. Попробуйте снова.");
-      return;
-    }
-
-    const [hour, minute] = input.split(":").map(Number);
-
-    if (reminders[chatId].job) {
-      reminders[chatId].job.cancel();
-    }
-
-    const now = new Date();
-    const reminderDate = new Date();
-    reminderDate.setHours(hour);
-    reminderDate.setMinutes(minute);
-    reminderDate.setSeconds(0);
-
-    if (reminderDate < now) {
-      reminderDate.setDate(now.getDate() + 1);
-    }
-
-    reminders[chatId].job = schedule.scheduleJob("0 0 * * *", () => {
-      if (reminders[chatId]) {
-        bot.api.sendMessage(chatId, `Напоминание: Время принять таблетки!`);
-      }
-    });
-
-    reminders[chatId].state = "set";
-    await ctx.reply(`Напоминание установлено на ${input} каждый день.`);
-  } else {
-    console.log(`Received message: ${ctx.message.text}`);
-  }
-});
-
 bot.catch((err) => {
   const ctx = err.ctx;
   console.error(`Error while handling update ${ctx.update.update_id}`);
